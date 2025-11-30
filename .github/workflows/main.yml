@@ -1,0 +1,70 @@
+name: Build Spring Boot App
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download JAR from dice-roller
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          mkdir -p lib
+          latest_run_id=$(gh run list -R LunaKB/dice-roller --workflow=main.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+          gh run download $latest_run_id -R LunaKB/dice-roller --name dice-roller.jar --dir lib
+
+      - name: Verify Downloaded JAR
+        run: ls -l lib/
+
+      - name: Set Up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache Gradle Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant Gradle Wrapper Execute Permission
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew clean build --no-daemon
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sat-dungeon-generation.jar
+          path: build/libs/*.jar
+
+      - name: Build Docker Image
+        run: | 
+          docker build -t sat-dungeon-generation:latest -f dockerfile .
+
+      - name: Save as TAR Archive
+        run: docker save sat-dungeon-generation:latest -o sat-dungeon-generation.tar
+
+      - name: Upload Docker Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sat-dungeon-generation-docker
+          path: |
+            dockerfile
+            sat-dungeon-generation.tar
